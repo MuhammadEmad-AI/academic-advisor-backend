@@ -40,4 +40,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/courses', [CourseController::class, 'store']);
     Route::put('/courses/{id}', [CourseController::class, 'update']);
     Route::delete('/courses/{id}', [CourseController::class, 'destroy']);
+    Route::get('/study-plans', [\App\Http\Controllers\StudyPlanController::class, 'index']);
+    Route::get('/admin/study-plans', [\App\Http\Controllers\StudyPlanController::class, 'allPlans']);
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/study-plans', [\App\Http\Controllers\StudyPlanController::class, 'store']);
+    Route::put('/study-plans/{id}', [\App\Http\Controllers\StudyPlanController::class, 'update']);
+    Route::delete('/study-plans/{id}', [\App\Http\Controllers\StudyPlanController::class, 'destroy']);
+    Route::post('/study-plans/{id}/courses', [\App\Http\Controllers\StudyPlanController::class, 'addCourse']);
+    Route::delete('/study-plans/{id}/courses/{course_id}', [\App\Http\Controllers\StudyPlanController::class, 'removeCourse']);
 });
