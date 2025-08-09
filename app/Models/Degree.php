@@ -12,23 +12,25 @@ class Degree extends Model
 {
     use HasFactory;
 
+    // --- لا تغيير هنا ---
     protected $fillable = [
-        'DegreeName',
-        'FacultyID',
+        'degree_name', // تم تعديلها لتطابق اسم العمود في قاعدة البيانات
+        'faculty_id',  // تم تعديلها لتطابق اسم العمود في قاعدة البيانات
     ];
 
+    // --- تم تعديل أسماء الأعمدة هنا ---
     public function faculty(): BelongsTo
     {
-        return $this->belongsTo(Faculty::class, 'FacultyID');
+        return $this->belongsTo(Faculty::class, 'faculty_id');
     }
 
     public function students(): HasMany
     {
-        return $this->hasMany(Student::class, 'DegreeID');
+        return $this->hasMany(Student::class, 'degree_id');
     }
 
     public function courses(): BelongsToMany
     {
-        return $this->belongsToMany(Course::class, 'degree_courses', 'DegreeID', 'CourseID');
+        return $this->belongsToMany(Course::class, 'degree_courses', 'degree_id', 'course_id');
     }
 }

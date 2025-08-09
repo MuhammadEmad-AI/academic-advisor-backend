@@ -13,9 +13,12 @@ class DegreeSeeder extends Seeder
      */
     public function run(): void
     {
+        // Degree::truncate(); // تفريغ الجدول أولاً
         Degree::create([
-            'degree_name' => 'Software Engineering',
-            'faculty_id' => 1, // Assumes the FacultySeeder has run and created a faculty with ID 1
+            'degree_name' => 'Software Engineering', 'faculty_id' => 1,
+        ]);
+        Degree::create([
+            'degree_name' => 'Bachelor of Pharmacy', 'faculty_id' => 2,
         ]);
     }
 }

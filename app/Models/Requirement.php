@@ -9,9 +9,10 @@ class Requirement extends Model
 {
     use HasFactory;
 
+    // --- تم تعديل أسماء الأعمدة هنا ---
     protected $fillable = [
-        'DegreeID',
-        'CourseID',
-        'RequirementType',
+        'degree_id',
+        'course_id',
+        'requirement_type',
     ];
 }

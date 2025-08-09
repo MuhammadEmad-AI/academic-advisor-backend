@@ -10,11 +10,7 @@ class Course extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
+    // --- لا تغيير هنا ---
     protected $fillable = [
         'course_name',
         'course_number',
@@ -23,35 +19,24 @@ class Course extends Model
         'status',
     ];
 
-    /**
-     * The prerequisites for this course.
-     */
+    // --- تم تعديل أسماء الأعمدة هنا ---
     public function prerequisites(): BelongsToMany
     {
-        return $this->belongsToMany(Course::class, 'prerequisites', 'CourseID', 'PrerequisiteID');
+        return $this->belongsToMany(Course::class, 'prerequisites', 'course_id', 'prerequisite_id');
     }
 
-    /**
-     * The courses that this course is a prerequisite for.
-     */
     public function isPrerequisiteFor(): BelongsToMany
     {
-        return $this->belongsToMany(Course::class, 'prerequisites', 'PrerequisiteID', 'CourseID');
+        return $this->belongsToMany(Course::class, 'prerequisites', 'prerequisite_id', 'course_id');
     }
 
-    /**
-     * The students that have taken this course.
-     */
     public function students(): BelongsToMany
     {
-        return $this->belongsToMany(Student::class, 'student_courses', 'CourseID', 'StudentID');
+        return $this->belongsToMany(Student::class, 'student_courses', 'course_id', 'student_id');
     }
 
-    /**
-     * The degrees that require this course.
-     */
     public function degrees(): BelongsToMany
     {
-        return $this->belongsToMany(Degree::class, 'degree_courses', 'CourseID', 'DegreeID');
+        return $this->belongsToMany(Degree::class, 'degree_courses', 'course_id', 'degree_id');
     }
 }

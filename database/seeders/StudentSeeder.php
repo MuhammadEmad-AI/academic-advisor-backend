@@ -25,7 +25,7 @@ class StudentSeeder extends Seeder
             'user_id' => $user->id,
             'student_name' => 'Muhammad Emad Alharash',
             'student_number' => '12345',
-            'degree_id' => 1,
+            'degree_id' => 2,
             'gpa' => 0.0,
         ]);
     }

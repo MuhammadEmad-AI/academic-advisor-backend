@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ApiAuthController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CourseController;
+use App\Http\Controllers\EligibleCoursesController;
 
 // Public authentication routes
 Route::post('/register', [RegisteredUserController::class, 'store'])->name('register');
@@ -18,6 +19,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+    Route::get('/student/eligible-courses', [EligibleCoursesController::class, 'getEligibleCourses']);
 
     Route::middleware('auth:sanctum')->post('/logout', [ApiAuthController::class, 'logout'])->name('logout');
     // Admin-only test route

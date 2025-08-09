@@ -13,14 +13,25 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
         $this->call([
+            // 1. الأساسيات
             FacultySeeder::class,
             DegreeSeeder::class,
+            SemesterSeeder::class,
+
+            // 2. كل المواد
+            UniversityCourseSeeder::class,
+            PharmacyCourseSeeder::class,
+
+            // 3. ربط المواد بالخطة الدراسية (الخطوة الجديدة والمهمة)
+            DegreeCourseSeeder::class,
+
+            // 4. المتطلبات
+            PrerequisiteSeeder::class,
+
+            // 5. الطالب وسجله
             StudentSeeder::class,
-            CourseSeeder::class,
-            StudyPlanSeeder::class,
+            StudentCourseSeeder::class,
         ]);
     }
 }
