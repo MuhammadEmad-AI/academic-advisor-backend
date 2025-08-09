@@ -25,6 +25,7 @@ class DatabaseSeeder extends Seeder
 
             // 3. ربط المواد بالخطة الدراسية (الخطوة الجديدة والمهمة)
             DegreeCourseSeeder::class,
+            RequirementSeeder::class,
 
             // 4. المتطلبات
             PrerequisiteSeeder::class,
