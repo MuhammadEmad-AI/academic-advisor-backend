@@ -10,7 +10,6 @@ class Course extends Model
 {
     use HasFactory;
 
-    // --- لا تغيير هنا ---
     protected $fillable = [
         'course_name',
         'course_number',
@@ -19,7 +18,6 @@ class Course extends Model
         'status',
     ];
 
-    // --- تم تعديل أسماء الأعمدة هنا ---
     public function prerequisites(): BelongsToMany
     {
         return $this->belongsToMany(Course::class, 'prerequisites', 'course_id', 'prerequisite_id');

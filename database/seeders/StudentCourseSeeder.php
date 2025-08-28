@@ -32,6 +32,7 @@ class StudentCourseSeeder extends Seeder
                 'course_id' => $biology1->id,
                 'semester_id' => 1, // رقم فصل افتراضي
                 'grade' => 'A+',
+                'point' => 4.0, 
                 'status' => 'completed', // <-- ناجح
                 'created_at' => now(), 'updated_at' => now()
             ],
@@ -40,6 +41,7 @@ class StudentCourseSeeder extends Seeder
                 'course_id' => $math->id,
                 'semester_id' => 1,
                 'grade' => 'B',
+                'point' => 3.0,
                 'status' => 'completed', // <-- ناجح
                 'created_at' => now(), 'updated_at' => now()
             ],
@@ -48,6 +50,7 @@ class StudentCourseSeeder extends Seeder
                 'course_id' => $physics->id,
                 'semester_id' => 1,
                 'grade' => 'F',
+                'point' => 0.0,
                 'status' => 'failed', // <-- راسب
                 'created_at' => now(), 'updated_at' => now()
             ],

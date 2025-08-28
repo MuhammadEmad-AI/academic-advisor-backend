@@ -17,7 +17,9 @@ return new class extends Migration
             $table->foreignId('course_id')->constrained('courses')->onDelete('cascade');
             $table->foreignId('semester_id')->constrained('semesters')->onDelete('cascade');
             $table->string('grade', 5)->nullable(); // e.g., "A+", "B", "C-", "F"
-            $table->enum('status', ['completed', 'in_progress', 'planned', 'failed'])->default('planned');
+            $table->float('point')->nullable();
+
+            $table->enum('status', ['completed', 'failed', 'selected']);
             $table->timestamps();
 
             $table->unique(['student_id', 'course_id']); // A student can take a course only once
