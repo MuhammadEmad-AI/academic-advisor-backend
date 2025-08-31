@@ -15,6 +15,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('degree_id')->constrained('degrees')->onDelete('cascade');
             $table->foreignId('course_id')->constrained('courses')->onDelete('cascade');
+            $table->integer('year')->nullable();
+            $table->integer('semester')->nullable();
             $table->timestamps();
 
             $table->unique(['degree_id', 'course_id']);

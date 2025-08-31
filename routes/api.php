@@ -11,10 +11,11 @@ use App\Http\Controllers\CourseController;
 use App\Http\Controllers\EligibleCoursesController;
 use App\Http\Controllers\SelectedCoursesController;
 use App\Http\Controllers\AcademicRecordController;
+use App\Http\Controllers\DataImportController;
 // Public authentication routes
 Route::post('/register', [RegisteredUserController::class, 'store'])->name('register');
 Route::post('/login', [ApiAuthController::class, 'login']);
-
+Route::post('/import/pharmacy-students', [DataImportController::class, 'importPharmacyStudentRecords']);
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {

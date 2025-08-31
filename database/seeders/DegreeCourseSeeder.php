@@ -11,27 +11,37 @@ class DegreeCourseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. ابحث عن شهادة الصيدلة (نفترض أن لها id = 2 كما في Seeders السابقة)
+        // ابحث عن شهادة الصيدلة (id = 2)
         $pharmacyDegree = Degree::find(2);
 
-        // إذا لم نجد الشهادة، لا تكمل
         if (!$pharmacyDegree) {
             return;
         }
+
+        // تفريغ الجدول لضمان عدم وجود بيانات قديمة
+        DB::table('degree_courses')->truncate();
 
         $csvFile = fopen(database_path('data/pharmacy_degree_plan.csv'), 'r');
         fgetcsv($csvFile); // تجاهل الهيدر
 
         while (($data = fgetcsv($csvFile, 2000, ',')) !== false) {
-            if (isset($data[0]) && !empty($data[0])) {
-                // ابحث عن المادة باستخدام رمزها
+            // نتأكد من وجود بيانات في الأعمدة المطلوبة
+            if (isset($data[0]) && !empty($data[0]) && isset($data[4]) && !empty($data[4]) && isset($data[5]) && !empty($data[5])) {
+                
+                // ابحث عن المادة باستخدام رمزها (من العمود الأول)
                 $course = Course::where('course_number', trim($data[0]))->first();
 
-                // إذا وجدنا المادة، قم بربطها بشهادة الصيدلة
+                // --- هنا التعديل: استخلاص العام والفصل ---
+                $year = (int)trim($data[4]);     // من العمود الخامس
+                $semester = (int)trim($data[5]); // من العمود السادس
+
+                // إذا وجدنا المادة، قم بربطها بالشهادة مع إضافة العام والفصل
                 if ($course) {
                     DB::table('degree_courses')->insert([
                         'degree_id' => $pharmacyDegree->id,
                         'course_id' => $course->id,
+                        'year'      => $year,      // <-- الإضافة هنا
+                        'semester'  => $semester,  // <-- الإضافة هنا
                         'created_at' => now(),
                         'updated_at' => now()
                     ]);

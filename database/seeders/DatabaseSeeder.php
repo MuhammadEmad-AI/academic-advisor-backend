@@ -17,7 +17,7 @@ class DatabaseSeeder extends Seeder
             // 1. الأساسيات
             FacultySeeder::class,
             DegreeSeeder::class,
-            SemesterSeeder::class,
+            
 
             // 2. كل المواد
             UniversityCourseSeeder::class,
@@ -31,8 +31,11 @@ class DatabaseSeeder extends Seeder
             PrerequisiteSeeder::class,
 
             // 5. الطالب وسجله
-            StudentSeeder::class,
-            StudentCourseSeeder::class,
+
+
+
+            PharmacyStudentRecordSeeder::class, 
+
         ]);
     }
 }

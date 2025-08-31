@@ -4,62 +4,69 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log; // <-- لا تنس إضافة هذا السطر
+use Illuminate\Support\Facades\Log;
 
 class EligibleCoursesController extends Controller
 {
     public function getEligibleCourses(Request $request)
     {
-        Log::info('--- EligibleCourses API: START ---');
         $student = Auth::user()->student;
 
         if (!$student) {
-            Log::error('EligibleCourses API: Student profile not found for authenticated user.');
             return response()->json(['message' => 'Student profile not found.'], 404);
         }
 
-        // 1. لنرَ ما هي المواد التي يعتبرها النظام "منجزة"
-        $completedCoursesIds = $student->courses()
-                                       ->wherePivot('status', 'completed')
-                                       ->pluck('courses.id');
-        Log::info('Step 1: Found ' . $completedCoursesIds->count() . ' completed courses. IDs: ' . $completedCoursesIds->implode(', '));
+        $completedCoursesIds = $student->courses()->wherePivot('status', 'completed')->pluck('courses.id');
+        $failedCoursesIds = $student->courses()->wherePivot('status', 'failed')->pluck('courses.id');
 
+        $allDegreeCourses = $student->degree
+                                    ->courses()
+                                    ->with(['prerequisites.requirements', 'requirements'])
+                                    ->get();
 
-        // 2. لنرَ كل مواد الخطة الدراسية
-        $allDegreeCourses = $student->degree->courses()->with('prerequisites')->get();
-        Log::info('Step 2: Found ' . $allDegreeCourses->count() . ' total courses for the degree.');
-
-
-        // 3. لنرَ المواد المتبقية
         $remainingCourses = $allDegreeCourses->whereNotIn('id', $completedCoursesIds);
-        Log::info('Step 3: Found ' . $remainingCourses->count() . ' remaining courses after removing completed ones.');
 
-
-        // 4. الآن سنقوم بالفلترة وسنرى لماذا يتم قبول أو رفض كل مادة
-        Log::info('--- Step 4: Filtering eligible courses... ---');
         $eligibleCourses = $remainingCourses->filter(function ($course) use ($completedCoursesIds) {
-
             $prerequisiteIds = $course->prerequisites->pluck('id');
-
-            Log::info("Checking course: '{$course->course_name}'");
-
-            if ($prerequisiteIds->isEmpty()) {
-                Log::info(" -> Status: ACCEPTED (No prerequisites)");
-                return true;
-            }
-
-            $missingPrerequisites = $prerequisiteIds->diff($completedCoursesIds);
-
-            if ($missingPrerequisites->isEmpty()) {
-                Log::info(" -> Status: ACCEPTED (All prerequisites met)");
-                return true;
-            } else {
-                Log::info(" -> Status: REJECTED (Missing prerequisites. Needed: " . $prerequisiteIds->implode(', ') . ", Missing: " . $missingPrerequisites->implode(', ') . ")");
-                return false;
-            }
+            return $prerequisiteIds->diff($completedCoursesIds)->isEmpty();
         });
-        Log::info('--- Filtering finished. Found ' . $eligibleCourses->count() . ' eligible courses. ---');
 
-        return response()->json($eligibleCourses->values());
+        // --- التعديل هنا: إعادة بناء شكل الخرج النهائي ليشمل كل الحقول ---
+        $formattedCourses = $eligibleCourses->map(function ($course) use ($student, $failedCoursesIds) {
+            
+            $mainRequirement = $course->requirements->where('degree_id', $student->degree_id)->first();
+            
+            $formattedPrerequisites = $course->prerequisites->map(function ($prereq) use ($student) {
+                $prereqRequirement = $prereq->requirements->where('degree_id', $student->degree_id)->first();
+                return [
+                    'course_number' => $prereq->course_number,
+                    'course_name' => $prereq->course_name,
+                    'requirement_type' => $prereqRequirement ? $prereqRequirement->requirement_type : null
+                ];
+            });
+
+            return [
+                // --- الحقول القديمة التي يجب إعادتها ---
+                'id' => $course->id,
+                'course_name' => $course->course_name,
+                'course_number' => $course->course_number,
+                'credit_hours' => $course->credit_hours,
+                'description' => $course->description,
+                'status' => $course->status,
+                'created_at' => $course->created_at,
+                'updated_at' => $course->updated_at,
+                'pivot' => $course->pivot ? [ // التأكد من وجود pivot
+                    'degree_id' => $course->pivot->degree_id,
+                    'course_id' => $course->pivot->course_id,
+                ] : null,
+                
+                // --- الحقول الجديدة التي أضفناها ---
+                'history_status' => $failedCoursesIds->contains($course->id) ? 'failed_before' : 'not_taken_before',
+                'requirement_type' => $mainRequirement ? $mainRequirement->requirement_type : null,
+                'prerequisites' => $formattedPrerequisites
+            ];
+        });
+        
+        return response()->json($formattedCourses->values());
     }
 }

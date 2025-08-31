@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany; // <-- أضف هذا السطر
 
 class Course extends Model
 {
@@ -37,4 +38,10 @@ class Course extends Model
     {
         return $this->belongsToMany(Degree::class, 'degree_courses', 'course_id', 'degree_id');
     }
+
+    public function requirements(): HasMany
+    {
+        return $this->hasMany(Requirement::class, 'course_id');
+    }
+
 }

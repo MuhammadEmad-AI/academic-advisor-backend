@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('student_courses', function (Blueprint $table) {
@@ -16,19 +13,18 @@ return new class extends Migration
             $table->foreignId('student_id')->constrained('students')->onDelete('cascade');
             $table->foreignId('course_id')->constrained('courses')->onDelete('cascade');
             $table->foreignId('semester_id')->constrained('semesters')->onDelete('cascade');
-            $table->string('grade', 5)->nullable(); // e.g., "A+", "B", "C-", "F"
+
+            // الأعمدة الخاصة بحالة المادة
+            $table->enum('status', ['completed', 'failed', 'selected']);
+            $table->integer('final_mark')->nullable();
+            $table->string('grade', 10)->nullable();
+            $table->string('result_code', 10)->nullable();
             $table->float('point')->nullable();
 
-            $table->enum('status', ['completed', 'failed', 'selected']);
             $table->timestamps();
-
-            $table->unique(['student_id', 'course_id']); // A student can take a course only once
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('student_courses');
