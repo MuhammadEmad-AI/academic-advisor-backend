@@ -16,6 +16,9 @@ return new class extends Migration
             $table->foreignId('study_plan_id')->constrained('study_plans')->onDelete('cascade');
             $table->foreignId('course_id')->constrained('courses')->onDelete('cascade');
             $table->timestamps();
+
+            $table->unique(['study_plan_id','course_id'], 'spc_studyplan_course_unique');
+
         });
     }
 

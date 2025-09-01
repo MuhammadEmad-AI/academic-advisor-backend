@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB; // <-- لا تنس إضافة هذا السطر
+use App\Models\StudyPlan; // <-- سنستخدم هذا النموذج
 
 class SelectedCoursesController extends Controller
 {
@@ -33,71 +34,110 @@ class SelectedCoursesController extends Controller
 
     public function store(Request $request)
     {
-        // 1. التحقق من المدخلات (يبقى كما هو)
         $validated = $request->validate([
-            'course_ids' => 'required|array', 
-            'course_ids.*' => 'required|integer|exists:courses,id' 
+            'course_ids'   => 'required|array|min:1',
+            'course_ids.*' => 'required|integer|distinct|exists:courses,id',
         ]);
-
+    
         $student = Auth::user()->student;
-        if (!$student) {
+        if (! $student) {
             return response()->json(['message' => 'Student profile not found.'], 404);
         }
-
-        $courseIds = $validated['course_ids'];
-        $semesterId = 1; // قيمة افتراضية
-
-        // --- هنا التعديل ---
-        // 2. نقوم بتجهيز مصفوفة بالصيغة التي يفهمها Laravel
-        $coursesToSync = [];
-        foreach ($courseIds as $courseId) {
-            // لكل course_id، نحدد البيانات الإضافية التي نريد حفظها معه
-            $coursesToSync[$courseId] = [
-                'status' => 'selected',
-                'semester_id' => $semesterId,
-                // grade و point سيتم تجاهلهما لأننا لم نضفهما هنا
-            ];
+    
+        $studyPlan = StudyPlan::firstOrCreate(
+            ['student_id' => $student->id],
+            ['name' => 'My Study Plan']
+        );
+    
+        $incoming  = $validated['course_ids'];
+        $existing  = $studyPlan->courses()->whereIn('courses.id', $incoming)
+                            ->pluck('courses.id')->all();
+        $toAdd     = array_values(array_diff($incoming, $existing));
+    
+        if (empty($toAdd)) {
+            return response()->json([
+                'message'         => 'All courses are already in your study plan.',
+                'already_in_plan' => $existing,
+            ], 409);
         }
-
-        // 3. الآن نستدعي الدالة مرة واحدة مع المصفوفة المجهزة
-        $student->courses()->syncWithoutDetaching($coursesToSync);
-
-        // 4. إرجاع رسالة نجاح (تبقى كما هي)
+    
+        DB::transaction(function () use ($studyPlan, $student, $toAdd) {
+            // أضفها إلى جدول الخطة بدون تكرار
+            $studyPlan->courses()->syncWithoutDetaching($toAdd);
+    
+            // أنشئ/حدّث السجل في student_courses مع حالة selected
+            $payload = [];
+            foreach ($toAdd as $cid) {
+                $payload[$cid] = [
+                    'status' => 'selected',
+                    'final_mark' => null,
+                    'grade' => null,
+                    'point' => null,
+                    // إما أن تتركها NULL إذا جعلت العمود nullable
+                    //'semester_id' => null
+                    // أو يمكنك هنا تحديد الفصل القادم، مثل:
+                     'semester_id' => 1
+                ];
+            }
+            $student->courses()->syncWithoutDetaching($payload);
+        });
+    
         return response()->json([
-            'message' => 'Courses have been selected successfully.',
-            'selected_courses_count' => count($courseIds)
-        ], 201); // 201 Created
+            'message'         => 'Courses added successfully.',
+            'added'           => $toAdd,
+            'already_in_plan' => $existing,
+        ], 201);
     }
-
+    
     public function destroy(Request $request)
     {
-        // 1. التحقق من صحة المدخلات (Validation)
         $validated = $request->validate([
-            'course_ids' => 'required|array',
-            'course_ids.*' => 'integer|exists:courses,id'
+            'course_ids'   => 'required|array|min:1',
+            'course_ids.*' => 'required|integer|distinct|exists:courses,id',
         ]);
 
         $student = Auth::user()->student;
-        if (!$student) {
+        if (! $student) {
             return response()->json(['message' => 'Student profile not found.'], 404);
         }
 
-        $courseIdsToRemove = $validated['course_ids'];
+        // الحصول على آخر خطة (أو استخدام firstOrCreate إذا أردت إنشاء واحدة)
+        $plan = $student->studyPlans()->latest()->first();
+        if (! $plan) {
+            return response()->json(['message' => 'No study plan found.'], 404);
+        }
 
-        // 2. نقوم بحذف السجلات من الجدول الوسيط مباشرة
-        // هذا الاستعلام آمن لأنه يضمن 3 شروط:
-        // - أن السجل يخص الطالب الحالي
-        // - أن حالة المادة هي 'selected' (لا يمكنه حذف مادة منجزة مثلاً)
-        // - أن المادة هي ضمن قائمة المواد المطلوب حذفها
-        DB::table('student_courses')
-            ->where('student_id', $student->id)
-            ->where('status', 'selected')
-            ->whereIn('course_id', $courseIdsToRemove)
-            ->delete();
+        $incoming  = $validated['course_ids'];
+        $current   = $plan->courses()->pluck('courses.id')->all();
+        $toRemove  = array_values(array_intersect($current, $incoming));
+        $notInPlan = array_values(array_diff($incoming, $current));
 
-        // 3. إرجاع رسالة نجاح
+        if (empty($toRemove)) {
+            return response()->json([
+                'message'     => 'None of the provided courses are in the study plan.',
+                'not_in_plan' => $notInPlan,
+            ], 404);
+        }
+
+        DB::transaction(function () use ($plan, $student, $toRemove) {
+            // إزالة المواد من جدول study_plan_courses
+            $plan->courses()->detach($toRemove);
+
+            // إزالة المواد من جدول student_courses فقط إذا كانت حالتها selected
+            foreach ($toRemove as $cid) {
+                $record = $student->courses()->where('courses.id', $cid)->first();
+                if ($record && $record->pivot->status === 'selected') {
+                    $student->courses()->detach($cid);
+                }
+            }
+        });
+
         return response()->json([
-            'message' => 'Selected courses have been removed successfully.'
-        ]);
+            'message'     => 'Courses removed from your study plan.',
+            'removed'     => $toRemove,
+            'not_in_plan' => $notInPlan,
+        ], 200);
     }
+
+    
 }
