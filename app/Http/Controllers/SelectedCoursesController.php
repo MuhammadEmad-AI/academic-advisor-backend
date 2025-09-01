@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB; // <-- لا تنس إضافة هذا السطر
 
 class SelectedCoursesController extends Controller
 {
@@ -68,4 +69,35 @@ class SelectedCoursesController extends Controller
         ], 201); // 201 Created
     }
 
+    public function destroy(Request $request)
+    {
+        // 1. التحقق من صحة المدخلات (Validation)
+        $validated = $request->validate([
+            'course_ids' => 'required|array',
+            'course_ids.*' => 'integer|exists:courses,id'
+        ]);
+
+        $student = Auth::user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Student profile not found.'], 404);
+        }
+
+        $courseIdsToRemove = $validated['course_ids'];
+
+        // 2. نقوم بحذف السجلات من الجدول الوسيط مباشرة
+        // هذا الاستعلام آمن لأنه يضمن 3 شروط:
+        // - أن السجل يخص الطالب الحالي
+        // - أن حالة المادة هي 'selected' (لا يمكنه حذف مادة منجزة مثلاً)
+        // - أن المادة هي ضمن قائمة المواد المطلوب حذفها
+        DB::table('student_courses')
+            ->where('student_id', $student->id)
+            ->where('status', 'selected')
+            ->whereIn('course_id', $courseIdsToRemove)
+            ->delete();
+
+        // 3. إرجاع رسالة نجاح
+        return response()->json([
+            'message' => 'Selected courses have been removed successfully.'
+        ]);
+    }
 }

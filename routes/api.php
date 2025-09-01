@@ -24,6 +24,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/student/eligible-courses', [EligibleCoursesController::class, 'getEligibleCourses']);
     Route::get('/student/selected-courses', [SelectedCoursesController::class, 'index']);
     Route::post('/student/selected-courses', [SelectedCoursesController::class, 'store']);
+    Route::delete('/student/selected-courses', [SelectedCoursesController::class, 'destroy']);
+
+    
     Route::get('/student/grades', [AcademicRecordController::class, 'getGrades']);
     Route::get('/student/failed-courses', [AcademicRecordController::class, 'getFailedCourses']);
     Route::get('/student/graduation-status', [AcademicRecordController::class, 'getGraduationStatus']);

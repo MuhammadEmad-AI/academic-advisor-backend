@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Course;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-
+use Illuminate\Support\Facades\DB;
 class CourseController extends Controller
 {
     // List all courses
@@ -15,13 +15,41 @@ class CourseController extends Controller
     }
 
     // Show a single course
-    public function show($id)
+    public function show(Request $request, $id) // <-- أضفنا Request $request هنا
     {
+        // 1. نبحث عن المادة كالمعتاد
         $course = Course::find($id);
         if (!$course) {
             return response()->json(['message' => 'Course not found'], 404);
         }
-        return response()->json($course);
+
+        // 2. نحصل على الطالب الحالي الذي أرسل الطلب
+        $student = $request->user()->student;
+        if (!$student) {
+            // إذا كان المستخدم ليس طالباً (ربما مدير)، نرجع بيانات المادة فقط
+            return response()->json($course);
+        }
+
+        // 3. نبحث عن "نوع المتطلب" الخاص بهذه المادة في خطة الطالب
+        $requirement = DB::table('requirements')
+            ->where('course_id', $course->id)
+            ->where('degree_id', $student->degree_id)
+            ->first();
+
+        // 4. نبحث عن "حالة الطالب" في هذه المادة من سجله الأكاديمي
+        $studentCourseRecord = DB::table('student_courses')
+            ->where('student_id', $student->id)
+            ->where('course_id', $course->id)
+            ->first();
+
+        // 5. نقوم بتجهيز الاستجابة النهائية
+        $courseData = $course->toArray(); // نحول بيانات المادة الأساسية إلى مصفوفة
+
+        // نضيف المعلومتين الجديدتين
+        $courseData['requirement_type'] = $requirement ? $requirement->requirement_type : null;
+        $courseData['student_status'] = $studentCourseRecord ? $studentCourseRecord->status : 'not_taken';
+
+        return response()->json($courseData);
     }
 
     // Create a new course (admin only)
