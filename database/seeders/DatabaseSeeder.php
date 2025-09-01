@@ -17,11 +17,11 @@ class DatabaseSeeder extends Seeder
             // 1. الأساسيات
             FacultySeeder::class,
             DegreeSeeder::class,
-            
 
             // 2. كل المواد
             UniversityCourseSeeder::class,
             PharmacyCourseSeeder::class,
+
 
             // 3. ربط المواد بالخطة الدراسية (الخطوة الجديدة والمهمة)
             DegreeCourseSeeder::class,
