@@ -18,6 +18,10 @@ return new class extends Migration
             $table->integer('credit_hours');
             $table->text('description')->nullable();
             $table->enum('status', ['active', 'inactive', 'archived'])->default('active');
+            $table->float('avg_grade')->nullable();
+            // مستوى الصعوبة للمادة: easy, medium, hard
+            $table->enum('difficulty', ['easy', 'medium', 'hard'])->nullable();
+
             $table->timestamps();
         });
     }

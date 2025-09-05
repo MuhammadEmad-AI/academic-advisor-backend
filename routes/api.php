@@ -12,10 +12,16 @@ use App\Http\Controllers\EligibleCoursesController;
 use App\Http\Controllers\SelectedCoursesController;
 use App\Http\Controllers\AcademicRecordController;
 use App\Http\Controllers\DataImportController;
+use App\Http\Controllers\PlanRecommendationController;
+
+
 // Public authentication routes
 Route::post('/register', [RegisteredUserController::class, 'store'])->name('register');
 Route::post('/login', [ApiAuthController::class, 'login']);
 Route::post('/import/pharmacy-students', [DataImportController::class, 'importPharmacyStudentRecords']);
+Route::middleware('auth:sanctum')->post('/student/recommend-plan-ai', [PlanRecommendationController::class, 'recommendAI']);
+Route::middleware('auth:sanctum')->post('/student/recommend-plan-ml', [PlanRecommendationController::class, 'recommendML']);
+
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {

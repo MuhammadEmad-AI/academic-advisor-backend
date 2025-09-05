@@ -19,9 +19,9 @@ class DatabaseSeeder extends Seeder
             DegreeSeeder::class,
 
             // 2. كل المواد
-            UniversityCourseSeeder::class,
-            PharmacyCourseSeeder::class,
-
+            //UniversityCourseSeeder::class,
+            CourseMasterSeeder::class,
+            CourseDifficultySeeder::class,
 
             // 3. ربط المواد بالخطة الدراسية (الخطوة الجديدة والمهمة)
             DegreeCourseSeeder::class,
@@ -35,7 +35,7 @@ class DatabaseSeeder extends Seeder
 
 
             PharmacyStudentRecordSeeder::class, 
-
+            PredictedMarksSeeder::class,
         ]);
     }
 }
