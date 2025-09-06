@@ -5,41 +5,39 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-
 use App\Models\Student;
-use App\Models\Course;
 use App\Models\PredictedMark;
 use App\Models\Prerequisite;
 use Illuminate\Support\Facades\DB;
 
 class PlanRecommendationController extends Controller
 {
+    /**
+     * استدعاء وكيل الذكاء الاصطناعى عبر n8n.
+     * يستخدم الطالب من التوكن ولا يحتاج student_number فى الـ request.
+     */
     public function recommendAI(Request $request)
     {
-        // التحقق من المدخلات: نحصل على رقم الطالب وعدد الساعات فقط
+        // التحقق من المدخلات (فقط عدد الساعات)
         $validated = $request->validate([
-            'student_number' => 'required|exists:students,student_number',
             'credit_hours' => 'required|integer|min:12|max:18',
         ]);
+        $maxHours = $validated['credit_hours'];
 
-        // التأكد من أن الطالب يخص المستخدم الحالى (اختيارى)
-        $currentStudent = Auth::user()->student;
-        if ($currentStudent->student_number !== $validated['student_number']) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        // الحصول على الطالب من التوكن
+        $student = Auth::user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Student profile not found.'], 404);
         }
-        
 
-        // جلب بيانات الطالب مع العلاقات اللازمة
-        $student = Student::where('student_number', $validated['student_number'])
-        ->with([
+        // تحميل العلاقات الضرورية
+        $student->load([
             'courses.prerequisites.prerequisite',
             'degree.courses.prerequisites',
             'degree.courses.requirements',
-        ])
-        ->firstOrFail();
-    
+        ]);
 
-        // المواد الناجحة مع العلامات، وإرسال avg_grade وdifficulty
+        // المواد الناجحة والراسبة مع الخصائص المطلوبة
         $passedCourses = $student->courses()
             ->wherePivot('status', 'completed')
             ->get()
@@ -56,7 +54,6 @@ class PlanRecommendationController extends Controller
                 ];
             });
 
-        // المواد الراسبة مع العلامات، وإرسال avg_grade وdifficulty
         $failedCourses = $student->courses()
             ->wherePivot('status', 'failed')
             ->get()
@@ -73,7 +70,7 @@ class PlanRecommendationController extends Controller
                 ];
             });
 
-        // تحديد المواد المفتوحة: استبعد المواد المكتملة والتى فى الخطة أو قيد الدراسة
+        // المواد المكتملة والموجودة فى الخطة حالياً
         $completedCourseIds = $student->courses()
             ->wherePivot('status', 'completed')
             ->pluck('courses.id');
@@ -82,28 +79,36 @@ class PlanRecommendationController extends Controller
             ->wherePivotIn('status', ['selected', 'in_progress'])
             ->pluck('courses.id');
 
+        // الحصول على كل مواد الخطة الدراسية (المفعّلة وساعاتها > 0)
         $allDegreeCourses = $student->degree->courses()
+            ->where('status', 'active')
+            ->where('credit_hours', '>', 0)
             ->with(['prerequisites.prerequisite', 'requirements'])
             ->get();
 
+        // المواد المتبقية بعد استبعاد المكتملة أو الموجودة فى الخطة
         $remainingCourses = $allDegreeCourses->whereNotIn('id', $completedCourseIds->merge($planCourseIds));
 
-        // تصفية المواد المؤهلة (لا متطلبات أو متطلباتها مكتملة)
+        // المواد المؤهلة: تحقق من المتطلبات المسبقة واستبعد المواد بساعات صفرية
         $eligibleCourses = $remainingCourses->filter(function ($course) use ($completedCourseIds) {
-            $prerequisiteIds = $course->prerequisites->pluck('prerequisite_id');
-            return $prerequisiteIds->diff($completedCourseIds)->isEmpty();
+            if ($course->credit_hours <= 0) {
+                return false;
+            }
+            $prereqIds = $course->prerequisites->pluck('prerequisite_id');
+            return $prereqIds->diff($completedCourseIds)->isEmpty();
         });
 
         /**
-         * حصر المواد الاختيارية: الكلية الاختيارية 10 ساعات، الجامعة الاختيارية 4 ساعات.
-         * نحسب الساعات التى أنجزها الطالب فى كل فئة، ثم نضيف المواد الراسبة، ثم نكمل بالمواد المفتوحة المناسبة حتى نصل للحد المطلوب.
+         * تحديد سقف الساعات الاختيارية:
+         *  - متطلبات الكلية الاختيارية: 10 ساعات
+         *  - متطلبات الجامعة الاختيارية: 4 ساعات
          */
         $electiveRequirements = [
-            'college_elective'    => 10, // عدد الساعات الاختيارية المطلوبة من الكلية
-            'university_elective' => 4,  // عدد الساعات الاختيارية المطلوبة من الجامعة
+            'college_elective'    => 10,
+            'university_elective' => 4,
         ];
 
-        // حساب الساعات المكتملة لكل فئة اختيارية
+        // حساب مجموع الساعات المكتملة لكل فئة اختيارية
         $completedCollegeElectiveCredits = $student->courses()
             ->wherePivot('status', 'completed')
             ->whereHas('requirements', function ($q) use ($student) {
@@ -118,7 +123,7 @@ class PlanRecommendationController extends Controller
                   ->where('requirement_type', 'university_elective');
             })->sum('credit_hours');
 
-        // حساب الساعات الراسبة فى كل فئة (يجب إعادة هذه المواد)
+        // حساب مجموع الساعات الراسبة لكل فئة
         $failedCollegeElectiveCredits = $student->courses()
             ->wherePivot('status', 'failed')
             ->whereHas('requirements', function ($q) use ($student) {
@@ -133,54 +138,40 @@ class PlanRecommendationController extends Controller
                   ->where('requirement_type', 'university_elective');
             })->sum('credit_hours');
 
-        // حساب الساعات المتبقية التى يجب تغطيتها بالمواد المفتوحة (بعد إضافة المواد الراسبة)
-        $remainingCollegeElectiveCredits = max(
-            0,
-            $electiveRequirements['college_elective'] - $completedCollegeElectiveCredits
-        );
-        $neededNewCollegeElectiveCredits = max(
-            0,
-            $remainingCollegeElectiveCredits - $failedCollegeElectiveCredits
-        );
+        // حساب ما تبقّى من الساعات المطلوبة لكل فئة
+        $remainingCollegeElectiveCredits = max(0, $electiveRequirements['college_elective'] - $completedCollegeElectiveCredits);
+        $neededNewCollegeElectiveCredits = max(0, $remainingCollegeElectiveCredits - $failedCollegeElectiveCredits);
 
-        $remainingUniversityElectiveCredits = max(
-            0,
-            $electiveRequirements['university_elective'] - $completedUniversityElectiveCredits
-        );
-        $neededNewUniversityElectiveCredits = max(
-            0,
-            $remainingUniversityElectiveCredits - $failedUniversityElectiveCredits
-        );
+        $remainingUniversityElectiveCredits = max(0, $electiveRequirements['university_elective'] - $completedUniversityElectiveCredits);
+        $neededNewUniversityElectiveCredits = max(0, $remainingUniversityElectiveCredits - $failedUniversityElectiveCredits);
 
-        // المواد الراسبة من كل فئة اختيارية
+        // الحصول على المواد الراسبة لكل فئة اختيارية
         $failedCollegeElectiveCourses = $student->courses()
-            ->wherePivot('status','failed')
+            ->wherePivot('status', 'failed')
             ->whereHas('requirements', function ($q) use ($student) {
-                $q->where('degree_id',$student->degree_id)
+                $q->where('degree_id', $student->degree_id)
                   ->where('requirement_type','college_elective');
             })->get();
 
         $failedUniversityElectiveCourses = $student->courses()
-            ->wherePivot('status','failed')
+            ->wherePivot('status', 'failed')
             ->whereHas('requirements', function ($q) use ($student) {
-                $q->where('degree_id',$student->degree_id)
+                $q->where('degree_id', $student->degree_id)
                   ->where('requirement_type','university_elective');
             })->get();
 
-        // اختيار عدد محدود من المواد المفتوحة لكل فئة اختيارية
-        // مواد اختيارية الكلية المفتوحة
+        // استخراج المواد الاختيارية المفتوحة لكل فئة
         $openCollegeElectives = $eligibleCourses->filter(function ($course) use ($student) {
             $req = $course->requirements->where('degree_id', $student->degree_id)->first();
             return $req && $req->requirement_type === 'college_elective';
         });
 
-        // مواد اختيارية الجامعة المفتوحة
         $openUniversityElectives = $eligibleCourses->filter(function ($course) use ($student) {
             $req = $course->requirements->where('degree_id', $student->degree_id)->first();
             return $req && $req->requirement_type === 'university_elective';
         });
 
-        // اختيار مواد الكلية الاختيارية بما لا يتجاوز الحاجة
+        // اختيار عدد محدود من المواد المفتوحة لكل فئة اختيارية
         $selectedCollegeElectives = collect();
         $creditSum = 0;
         foreach ($openCollegeElectives as $course) {
@@ -191,7 +182,6 @@ class PlanRecommendationController extends Controller
             $creditSum += $course->credit_hours;
         }
 
-        // اختيار مواد الجامعة الاختيارية بما لا يتجاوز الحاجة
         $selectedUniversityElectives = collect();
         $creditSumUni = 0;
         foreach ($openUniversityElectives as $course) {
@@ -202,28 +192,24 @@ class PlanRecommendationController extends Controller
             $creditSumUni += $course->credit_hours;
         }
 
-        // بناء قائمة المواد المؤهلة النهائية: المواد غير الاختيارية + المواد الراسبة + المواد المفتوحة المختارة
+        // بناء قائمة المواد المؤهلة النهائية
         $restrictedEligibleCourses = collect();
-
         foreach ($eligibleCourses as $course) {
             $req = $course->requirements->where('degree_id', $student->degree_id)->first();
-            // إذا لم تكن المادة اختيارية (كلية أو جامعة)، نضيفها مباشرة
-            if (!$req || !in_array($req->requirement_type, array_keys($electiveRequirements))) {
+            // إذا لم تكن المادة اختيارية، نضيفها مباشرة
+            if (!$req || !array_key_exists($req->requirement_type, $electiveRequirements)) {
                 $restrictedEligibleCourses->push($course);
             }
         }
-
         $restrictedEligibleCourses = $restrictedEligibleCourses
             ->merge($failedCollegeElectiveCourses)
             ->merge($failedUniversityElectiveCourses)
             ->merge($selectedCollegeElectives)
             ->merge($selectedUniversityElectives);
 
-        // تهيئة المواد المؤهلة لإرسالها للوكيل الذكى، مع avg_grade وdifficulty
+        // تهيئة البيانات للوكيل الذكى
         $eligibleFormatted = $restrictedEligibleCourses->map(function ($course) use ($student) {
-            $mainRequirement = $course->requirements
-                ->where('degree_id', $student->degree_id)
-                ->first();
+            $mainRequirement = $course->requirements->where('degree_id', $student->degree_id)->first();
             return [
                 'id'              => $course->id,
                 'course_number'   => $course->course_number,
@@ -235,13 +221,13 @@ class PlanRecommendationController extends Controller
             ];
         });
 
-        // تحديد نوع الطلب حسب المعدل التراكمى: إذا أقل من 2.0 فهدفه رفع المعدل، وإلا خطة عادية
+        // تحديد نوع الطلب حسب المعدل التراكمى
         $requestType = $student->gpa < 2.0 ? 'raise_gpa' : 'study_plan';
 
-        // بناء الـpayload للوكيل الذكى
+        // بناء الـ payload
         $payload = [
             'student_number'   => $student->student_number,
-            'credit_hours'     => $validated['credit_hours'],
+            'credit_hours'     => $maxHours,
             'request_type'     => $requestType,
             'gpa'              => $student->gpa,
             'passed_courses'   => $passedCourses->values()->toArray(),
@@ -249,9 +235,8 @@ class PlanRecommendationController extends Controller
             'eligible_courses' => $eligibleFormatted->values()->toArray(),
         ];
 
-        // استدعاء n8n عبر الـWebhook (استبدل هذا العنوان بالعنوان الصحيح لديك)
-        $webhookUrl = 'https://aitraining.jirventures.com/webhook-test/academic';
-
+        // استدعاء الوكيل الذكى عبر n8n
+        $webhookUrl = 'https://aitraining.jirventures.com/webhook/academic';
         try {
             $response = Http::withoutVerifying()->post($webhookUrl, $payload);
             $body = $response->json();
@@ -260,21 +245,14 @@ class PlanRecommendationController extends Controller
                 return response()->json($plan, $response->status());
             }
             return response()->json($body, $response->status());
-        } 
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to contact AI agent.'], 500);
         }
-        
     }
 
-
-
-
-
-
-
-
-
+    /**
+     * التوصية باستخدام النموذج المدرب (ML) دون وكيل خارجى.
+     */
     public function recommendML(Request $request)
     {
         // 1. التحقق من المدخلات
@@ -282,54 +260,60 @@ class PlanRecommendationController extends Controller
             'credit_hours' => 'required|integer|min:12|max:18',
         ]);
         $maxHours = $validated['credit_hours'];
-        
-        $user = Auth::user();
-        $student = $user->student; // تأكد أن لديك علاقة student() فى موديل User
-        
-        // إذا كنت بحاجة للرقم الجامعى
+
+        // الحصول على الطالب من التوكن
+        $student = Auth::user()->student;
+        if (!$student) {
+            return response()->json(['message' => 'Student profile not found.'], 404);
+        }
+
+
+
         $studentNumber = $student->student_number;
 
-        // 2. جلب بيانات الطالب وعلاقاته
-        $student = Student::with(['courses', 'degree.courses.prerequisites', 'degree.courses.requirements'])
-                          ->where('student_number', $studentNumber)
-                          ->firstOrFail();
+        // 2. جلب بيانات الطالب مع العلاقات
+        $student = Student::with([
+            'courses',
+            'degree.courses.prerequisites',
+            'degree.courses.requirements',
+            'studyPlans.courses' // Add study plans with courses
+        ])->where('student_number', $studentNumber)->firstOrFail();
 
-        // حساب الـ GPA للطالب (استخدم gpa من الجدول إن وجد، أو متوسط النقاط)
+        // 3. حساب الـ GPA
         $gpa = $student->gpa ?? $student->courses()->avg('student_courses.point');
 
-        // 3. استخراج المواد التى درسها الطالب (مكتملة، قيد التنفيذ، راسبة)
+        // 3.1. حساب ساعات الخطة الدراسية
+        $planCreditHours = 0;
+        if ($student->studyPlans->isNotEmpty()) {
+            foreach ($student->studyPlans as $studyPlan) {
+                $planCreditHours += $studyPlan->courses->sum('credit_hours');
+            }
+        }
+
+        // 4. استخراج المواد التى درسها الطالب
         $completedCourses = $student->courses()->wherePivot('status', 'completed')->get();
         $inProgressIds    = $student->courses()->wherePivotIn('status', ['selected','in_progress'])->pluck('courses.id');
         $failedCourses    = $student->courses()->wherePivot('status','failed')->get();
 
-
-
-            // مسار الطالب الجديد: لا يوجد أى سجل سابق
+        // مسار الطالب الجديد (لا يوجد سجل سابق)
         if ($completedCourses->isEmpty() && $failedCourses->isEmpty() && $inProgressIds->isEmpty()) {
-            // جلب مواد الفصل الأول/المواد بدون متطلبات
+            // جلب مواد بدون متطلبات مع استبعاد المواد بساعات صفرية
             $candidateCourses = $student->degree->courses->filter(function ($course) {
-                return $course->prerequisites->isEmpty();
+                return $course->prerequisites->isEmpty() && $course->credit_hours > 0;
             });
 
-            // حساب عدد المقررات التى تعتمد على كل مادة (Gateway count)
+            // حساب عدد المقررات التى تعتمد على كل مادة
             $gatewayCounts = Prerequisite::select('prerequisite_id', DB::raw('COUNT(*) as cnt'))
                                 ->groupBy('prerequisite_id')
                                 ->pluck('cnt', 'prerequisite_id');
 
-            // إعداد المرشحين مع درجة مركبة تعتمد على avg_grade و gateway و الصعوبة
+            // إعداد المرشحين مع درجة مركبة
             $candidates = [];
             foreach ($candidateCourses as $course) {
                 $gatewayCount = $gatewayCounts[$course->id] ?? 0;
-
-                // نبدأ بالعلامة المتوسطة للمادة (كلما كانت أعلى فالمادة أسهل)
                 $score = $course->avg_grade ?? 0;
-
-                // مكافأة المواد التى تفتح مقررات كثيرة
                 $score += $gatewayCount * 2;
-
-                // خصم للصعوبات: المواد السهلة لا خصم، المتوسطة –5، الصعبة –10
-                $difficulty = $course->difficulty;
-                $penalty = match ($difficulty) {
+                $penalty = match ($course->difficulty) {
                     'easy'   => 0,
                     'medium' => 5,
                     'hard'   => 10,
@@ -345,20 +329,17 @@ class PlanRecommendationController extends Controller
                 ];
             }
 
-            // ترتيب تنازلى بالدرجة
+            // ترتيب المرشحين
             usort($candidates, fn($a, $b) => $b['score'] <=> $a['score']);
 
-            // اختيار المقررات ضمن سقف الساعات والاختياريات
+            // اختيار المقررات ضمن السقف والاختياريات
             $selected = [];
             $totalHours = 0;
-            $collegeElectiveHours    = 0;
+            $collegeElectiveHours = 0;
             $universityElectiveHours = 0;
 
             foreach ($candidates as $cand) {
-                // التحقق من الحد الإجمالى
                 if ($totalHours + $cand['hours'] > $maxHours) continue;
-
-                // التحقق من حدود الاختياريات
                 if ($cand['reqType'] === 'college_elective' && $collegeElectiveHours + $cand['hours'] > 10) continue;
                 if ($cand['reqType'] === 'university_elective' && $universityElectiveHours + $cand['hours'] > 4) continue;
 
@@ -366,11 +347,10 @@ class PlanRecommendationController extends Controller
                 $totalHours += $cand['hours'];
                 if ($cand['reqType'] === 'college_elective')    $collegeElectiveHours    += $cand['hours'];
                 if ($cand['reqType'] === 'university_elective') $universityElectiveHours += $cand['hours'];
-
                 if ($totalHours >= $maxHours) break;
             }
 
-            // إعادة النتائج بشكل مماثل لباقى المنطق
+            // إعادة النتائج
             $responseCourses = [];
             foreach ($selected as $item) {
                 $c = $item['course'];
@@ -378,7 +358,7 @@ class PlanRecommendationController extends Controller
                     'course_number'    => $c->course_number,
                     'course_name'      => $c->course_name,
                     'credit_hours'     => $c->credit_hours,
-                    'predicted_mark'   => round($c->avg_grade, 2), // باستخدام متوسط العلامة كمؤشر
+                    'predicted_mark'   => round($c->avg_grade, 2),
                     'score'            => round($item['score'], 2),
                     'requirement_type' => $item['reqType'],
                     'difficulty'       => $c->difficulty,
@@ -388,50 +368,43 @@ class PlanRecommendationController extends Controller
             }
 
             return response()->json([
-                'student_number'        => $student->student_number,
-                'requested_hours'       => $maxHours,
-                'total_selected_hours'  => $totalHours,
-                'courses'               => $responseCourses,
-                'gpa'                   => $gpa !== null ? round($gpa, 3) : null,
+                'student_number'       => $student->student_number,
+                'requested_hours'      => $maxHours,
+                'total_selected_hours' => $totalHours,
+                'courses'              => $responseCourses,
+                'gpa'                  => $gpa !== null ? round($gpa, 3) : null,
+                'plan_credit_hours'    => $planCreditHours,
                 'note' => 'New student: using average course performance as guide.',
             ]);
         }
 
-        
-        // 4. تحديد المواد المتبقية (لم تدرس بعد) والمفتوحة (استيفاء المتطلبات)
+        // 5. تحديد المواد المتبقية والمفتوحة مع استبعاد المواد بساعات صفرية
         $completedIds = $completedCourses->pluck('id');
-        $remaining    = $student->degree->courses
-                            ->whereNotIn('id', $completedIds->merge($inProgressIds));
-        // فلترة بحسب المتطلبات
+        $remaining = $student->degree->courses->whereNotIn('id', $completedIds->merge($inProgressIds));
         $eligible = $remaining->filter(function ($course) use ($completedIds) {
+            if ($course->credit_hours <= 0) {
+                return false;
+            }
             $prereqIds = $course->prerequisites->pluck('prerequisite_id');
             return $prereqIds->diff($completedIds)->isEmpty();
         });
 
-        // 5. جلب التوقعات من جدول predicted_marks
-        $predicted = PredictedMark::where('student_number', $studentNumber)
-                        ->pluck('predicted_mark', 'course_number');
+        // 6. جلب التوقعات من جدول predicted_marks
+        $predicted = PredictedMark::where('student_number', $student->student_number)
+                         ->pluck('predicted_mark', 'course_number');
 
-        // 6. حساب عدد المواد التى تعتمد على كل مادة (Gateway count)
-        $gatewayCounts = Prerequisite::select('prerequisite_id', DB::raw('COUNT(*) as cnt'))
-                            ->groupBy('prerequisite_id')
-                            ->pluck('cnt', 'prerequisite_id');
-
-        // 7. إعداد قائمة المرشحين مع النقاط والحالات الإضافية
+        // 7. تحضير المرشحين مع النقاط والحالات الإضافية
         $candidates = [];
         foreach ($eligible as $course) {
             $courseNumber = $course->course_number;
             $predMark     = $predicted[$courseNumber] ?? null;
             if ($predMark === null) {
-                // إذا لم تكن هناك علامة متوقعة، يمكن تجاهل المادة أو إعطاءها قيمة افتراضية
                 continue;
             }
-
-            // معرفة إذا كان الطالب رسب مسبقًا فى هذه المادة
+            // تحضير الحالات الإضافية
             $failedRecord = $failedCourses->firstWhere('id', $course->id);
             $isFailed     = $failedRecord !== null;
 
-            // معرفة إذا كانت العلامة السابقة فى هذا المقرر بين 50 و60 (رفع شرطى)
             $conditionalPass = false;
             if ($record = $completedCourses->firstWhere('id', $course->id)) {
                 $finalMark = $record->pivot->final_mark ?? null;
@@ -440,46 +413,34 @@ class PlanRecommendationController extends Controller
                 }
             }
 
-            // تحديد عدد المواد التى تعتمد على هذه المادة
+            $gatewayCounts = Prerequisite::select('prerequisite_id', DB::raw('COUNT(*) as cnt'))
+                                ->groupBy('prerequisite_id')
+                                ->pluck('cnt', 'prerequisite_id');
             $gatewayCount = $gatewayCounts[$course->id] ?? 0;
 
-            // إعداد متغيرات الصعوبة
-            $difficulty = $course->difficulty; // easy, medium, hard
-
-            // حساب الدرجة الأولية
             $score = $predMark;
 
-            // مكافأة للمادة الراسبة
             if ($isFailed) {
                 $score += 10;
             }
-
-            // مكافأة للمادة المرفوعة شرطياً إذا كان معدل الطالب أقل من 2 (يحتاج رفع معدل)
             if ($conditionalPass && $gpa < 2.0) {
                 $score += 8;
             }
-
-            // مكافأة للمادة التى تفتح مقررات عديدة
             if ($gatewayCount > 0) {
-                $score += $gatewayCount * 2;  // كل مقرر إضافى يفتح = +2
+                $score += $gatewayCount * 2;
             }
 
-            // تعديل حسب الصعوبة ومعدل الطالب
-            $difficultyPenalty = match ($difficulty) {
+            $difficultyPenalty = match ($course->difficulty) {
                 'easy'   => 0,
                 'medium' => 5,
                 'hard'   => 10,
                 default  => 0,
             };
-
             if ($gpa < 2.0) {
-                // الطالب منخفض المعدل يتجنب المواد الصعبة
                 $score -= $difficultyPenalty;
             } elseif ($gpa > 3.0) {
-                // الطالب مرتفع المعدل يمكنه تحمّل الأصعب (نضاعف المكافأة قليلاً)
                 $score += $difficultyPenalty * 0.5;
             }
-            // خلاف ذلك لا تغيير للمعدل المتوسط
 
             $candidates[] = [
                 'course'         => $course,
@@ -492,22 +453,19 @@ class PlanRecommendationController extends Controller
             ];
         }
 
-        // 8. ترتيب المرشحين حسب الدرجة Desc
+        // 8. ترتيب المرشحين حسب الدرجة
         usort($candidates, fn($a, $b) => $b['score'] <=> $a['score']);
 
-        // 9. اختيار المواد ضمن السقف والقيود
+        // 9. اختيار المواد ضمن القيود
         $selected = [];
         $totalHours = 0;
         $collegeElectiveHours    = 0;
         $universityElectiveHours = 0;
 
-        // أولاً: إضافة المواد الراسبة (إذا الدرجات المتوقعة ليست منخفضة جدًا)
+        // المواد الراسبة أولاً
         foreach ($candidates as $cand) {
             if ($cand['is_failed']) {
-                $c = $cand['course'];
-                // تحقق من الساعات
                 if ($totalHours + $cand['hours'] > $maxHours) continue;
-                // تحقق من حدود الاختياريات
                 if ($cand['requirement_type'] === 'college_elective' && $collegeElectiveHours + $cand['hours'] > 10) continue;
                 if ($cand['requirement_type'] === 'university_elective' && $universityElectiveHours + $cand['hours'] > 4) continue;
 
@@ -518,10 +476,9 @@ class PlanRecommendationController extends Controller
             }
         }
 
-        // ثانياً: إضافة المواد المرفوعة شرطياً عند الحاجة
+        // المواد المرفوعة شرطياً للطلاب منخفضى المعدل
         foreach ($candidates as $cand) {
             if (!$cand['is_failed'] && $cand['is_conditional'] && $gpa < 2.0) {
-                $c = $cand['course'];
                 if ($totalHours + $cand['hours'] > $maxHours) continue;
                 if ($cand['requirement_type'] === 'college_elective' && $collegeElectiveHours + $cand['hours'] > 10) continue;
                 if ($cand['requirement_type'] === 'university_elective' && $universityElectiveHours + $cand['hours'] > 4) continue;
@@ -533,12 +490,11 @@ class PlanRecommendationController extends Controller
             }
         }
 
-        // ثالثاً: إضافة باقى المواد حسب الترتيب حتى الوصول إلى سقف الساعات
+        // إضافة باقى المواد حسب الترتيب
         foreach ($candidates as $cand) {
             if ($cand['is_failed'] || ($cand['is_conditional'] && $gpa < 2.0)) {
-                continue; // تم إضافتها مسبقًا
+                continue;
             }
-            $c = $cand['course'];
             if ($totalHours + $cand['hours'] > $maxHours) continue;
             if ($cand['requirement_type'] === 'college_elective' && $collegeElectiveHours + $cand['hours'] > 10) continue;
             if ($cand['requirement_type'] === 'university_elective' && $universityElectiveHours + $cand['hours'] > 4) continue;
@@ -547,11 +503,10 @@ class PlanRecommendationController extends Controller
             $totalHours += $cand['hours'];
             if ($cand['requirement_type'] === 'college_elective')    $collegeElectiveHours    += $cand['hours'];
             if ($cand['requirement_type'] === 'university_elective') $universityElectiveHours += $cand['hours'];
-
             if ($totalHours >= $maxHours) break;
         }
 
-        // 10. هيكلة النتائج النهائية
+        // 10. إعداد الرد النهائى
         $responseCourses = [];
         foreach ($selected as $item) {
             $c = $item['course'];
@@ -570,11 +525,12 @@ class PlanRecommendationController extends Controller
         }
 
         return response()->json([
-            'student_number'     => $studentNumber,
-            'requested_hours'    => $maxHours,
-            'total_selected_hours' => $totalHours,
-            'courses'            => $responseCourses,
-            'gpa'                => round($gpa, 3),
+            'student_number'      => $student->student_number,
+            'plan_credit_hours'   => $planCreditHours,
+            'requested_hours'     => $maxHours,
+            'total_selected_hours'=> $totalHours,
+            'courses'             => $responseCourses,
+            'gpa'                 => round($gpa, 3),
         ]);
     }
 }

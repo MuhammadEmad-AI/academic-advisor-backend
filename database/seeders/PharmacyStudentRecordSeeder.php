@@ -16,149 +16,195 @@ class PharmacyStudentRecordSeeder extends Seeder
 {
     public function run(): void
     {
-        Log::info('--- PharmacyStudentRecordSeeder is starting ---');
-        
-        $pharmacyDegree = Degree::find(2);
-        if (!$pharmacyDegree) {
-            Log::error('Pharmacy Degree with ID 2 not found. Aborting Seeder.');
+        Log::info('--- PharmacyStudentRecordSeeder START ---');
+
+        $degree = Degree::find(2);
+        if (!$degree) {
+            Log::error('Degree with ID 2 not found. Abort.');
             return;
         }
 
-        $csvFile = fopen(database_path('data/pharmacy_student_records.csv'), 'r');
-        fgetcsv($csvFile);
-        
-        $processedStudentNumbers = []; // مصفوفة لتخزين أرقام الطلاب الذين تمت معالجتهم
-        $batchSize = 500; // Process in smaller batches
-        $recordCount = 0;
+        $path   = database_path('data/pharmacy_student_records.csv');
+        $handle = fopen($path, 'r');
 
-        while (($data = fgetcsv($csvFile, 2000, ',')) !== false) {
-            $recordCount++;
+        // تجاهل صفّ العناوين
+        fgetcsv($handle);
+
+        $now = now();
+
+        // سنجمع البيانات هنا
+        $userInserts    = [];  // بيانات المستخدمين الجدد
+        $studentNumbers = [];  // أرقام الطلاب التى رأيناها
+        $records        = [];  // سجلات student_courses المجمعة
+        $semesterCache  = [];  // كاش لمعرفة معرّف الفصل
+        $courseIds      = Course::pluck('id', 'course_number'); // map code => id
+        
+        $batchSize = 1000; // Process in batches
+        $rowCount = 0;
+
+        while (($row = fgetcsv($handle, 0, ',')) !== false) {
+            $rowCount++;
             
-            // Log progress every 1000 records
-            if ($recordCount % 1000 === 0) {
-                Log::info("Processed {$recordCount} records so far...");
+            // Log progress every 10000 rows
+            if ($rowCount % 10000 === 0) {
+                Log::info("Processed {$rowCount} rows from pharmacy student records CSV");
             }
             
-            $studentNumber = trim($data[1]);
-            $yearCode = trim($data[2]);
-            
-            // Process all years from 2018 to 2024
-            if (isset($data[2]) && preg_match('/^(201[8-9]|202[0-4])\d$/', $yearCode)) {
-                // ... (بقية كود استخلاص البيانات)
-                $partId = trim($data[2]);
-                $courseCode = trim($data[6]);
-                $finalMark = (int)trim($data[7]);
-                $grade = trim($data[8]);
-                $resultCode = trim($data[9]);
-                $point = (float)trim($data[10]);
+            $studentNumber = trim($row[1]);
+            $termCode      = trim($row[2]); // شكلها 20241 أو 20242
+            $courseCode    = trim($row[6]);
+            $finalMark     = trim($row[7]) === '' ? null : (int)$row[7];
+            $gradeLetter   = trim($row[8]);
+            $resultCode    = trim($row[9]);
+            $point         = trim($row[10]) === '' ? null : (float)$row[10];
 
-                if(empty($data[7])) continue;
+            // نتابع فقط السنوات 2018-2024 والصفوف ذات علامة نهائية
+            if (!$finalMark || !preg_match('/^(201[8-9]|202[0-4])\d$/', $termCode)) {
+                continue;
+            }
 
-                $user = User::where('student_number', $studentNumber)->first();
-                if (!$user) {
-                    $user = User::create([
-                        'name' => 'Student ' . $studentNumber,
-                        'email' => $studentNumber . '@university.com',
-                        'password' => Hash::make('password'),
-                        'student_number' => $studentNumber,
-                        'role' => 'student',
-                    ]);
-                }
+            // جهّز المستخدم والطالب إن لم يكن موجودًا
+            if (!isset($studentNumbers[$studentNumber])) {
+                $userInserts[] = [
+                    'name'           => 'Student '.$studentNumber,
+                    'email'          => $studentNumber.'@university.com',
+                    'password'       => Hash::make('password'),
+                    'student_number' => $studentNumber,
+                    'role'           => 'student',
+                ];
+                $studentNumbers[$studentNumber] = true;
+            }
 
-                $student = Student::where('user_id', $user->id)->first();
-                if (!$student) {
-                    $student = Student::create([
-                        'user_id' => $user->id,
-                        'student_name' => 'Student ' . $studentNumber,
-                        'student_number' => $studentNumber,
-                        'degree_id' => $pharmacyDegree->id,
-                        'gpa' => 0.0,
-                    ]);
-                }
+            // استخراج السنة ورقم الفصل (1=Fall,2=Spring,3=Summer)
+            $year  = substr($termCode, 0, 4);
+            $semNo = substr($termCode, -1);
+            $semName = match((int)$semNo) {
+                1 => 'Fall',
+                2 => 'Spring',
+                3 => 'Summer',
+                default => 'Fall',
+            };
+            $semKey = $year.'-'.$semName;
 
-                if (!in_array($student->student_number, $processedStudentNumbers)) {
-                    $processedStudentNumbers[] = $student->student_number;
-                }
+            // احصل على معرّف الفصل من الكاش أو أنشئه
+            if (!isset($semesterCache[$semKey])) {
+                $semester = Semester::firstOrCreate(['Year' => $year, 'SemesterName' => $semName]);
+                $semesterCache[$semKey] = $semester->id;
+            }
+            $semesterId = $semesterCache[$semKey];
 
-                $course = Course::where('course_number', $courseCode)->first();
-                
-                // Parse year code and create semester with proper name
-                $year = substr($partId, 0, 4);
-                $semesterNumber = substr($partId, 4, 1);
-                $semesterName = match((int)$semesterNumber) {
-                    1 => 'Fall',
-                    2 => 'Spring',
-                    3 => 'Summer',
-                    default => 'Fall'
-                };
-                
-                $semester = Semester::firstOrCreate([
-                    'Year' => $year, 
-                    'SemesterName' => $semesterName
-                ]);
-                
-                $status = ($point > 0.0 && $resultCode === 'P') ? 'completed' : 'failed';
+            // معرّف المقرر
+            $courseId = $courseIds[$courseCode] ?? null;
+            if (!$courseId) {
+                continue; // إذا لم يكن المقرر موجودًا لا تتابع
+            }
 
-                if ($student && $course && $semester) {
-                    // نستخدم updateOrInsert لتجنب أخطاء تكرار المفتاح الأساسي
-                    try {
-                        DB::table('student_courses')->updateOrInsert(
-                            ['student_id' => $student->id, 'course_id' => $course->id],
-                            [
-                                'semester_id' => $semester->id,
-                                'status' => $status,
-                                'final_mark' => $finalMark,
-                                'grade' => $grade,
-                                'result_code' => $resultCode,
-                                'point' => $point,
-                                'created_at'  => now(),
-                                'updated_at' => now(),
-                            ]
-                        );
-                    } catch (\Exception $e) {
-                        Log::warning("Failed to insert student course record: " . $e->getMessage());
-                        continue;
-                    }
-                }
-                
-                // Clear memory every 1000 records
-                if ($recordCount % 1000 === 0) {
-                    gc_collect_cycles();
-                }
+            // تحديد حالة الطالب فى المقرر
+            $status = ($point !== null && $resultCode === 'P') ? 'completed' : 'failed';
 
+            $records[] = [
+                'student_number' => $studentNumber,
+                'course_id'      => $courseId,
+                'semester_id'    => $semesterId,
+                'status'         => $status,
+                'final_mark'     => $finalMark,
+                'grade'          => $gradeLetter,
+                'result_code'    => $resultCode,
+                'point'          => $point,
+                'created_at'     => $now,
+                'updated_at'     => $now,
+            ];
+        }
+        fclose($handle);
+
+        // 1) إدراج أو تحديث المستخدمين
+        User::upsert($userInserts, ['student_number'], ['name','email','password','role']);
+
+        // 2) إدراج الطلاب الجدد
+        $existingStudents = Student::whereIn('student_number', array_keys($studentNumbers))
+            ->pluck('id','student_number');
+        $studentInserts = [];
+        foreach ($studentNumbers as $sn => $dummy) {
+            if (!isset($existingStudents[$sn])) {
+                $userId = User::where('student_number', $sn)->value('id');
+                $studentInserts[] = [
+                    'user_id'        => $userId,
+                    'student_name'   => 'Student '.$sn,
+                    'student_number' => $sn,
+                    'degree_id'      => $degree->id,
+                    'gpa'            => 0.0,
+                ];
             }
         }
-        fclose($csvFile);
-        Log::info('--- Finished inserting student records. Now calculating GPAs... ---');
-        
-        // ===================================================================
-        // الجزء الجديد: حساب وتحديث المعدل التراكمي لكل طالب باستخدام استعلام مباشر
-        // ===================================================================
-        foreach ($processedStudentNumbers as $studentNumber) {
-            $student = Student::where('student_number', $studentNumber)->first();
-            if (!$student) continue;
+        Student::upsert($studentInserts, ['student_number'], ['user_id','degree_id']);
 
-            $result = DB::table('student_courses')
-                ->join('courses', 'student_courses.course_id', '=', 'courses.id')
-                ->where('student_courses.student_id', $student->id)
-                ->where('student_courses.status', 'completed')
-                ->select(
-                    DB::raw('SUM(student_courses.point * courses.credit_hours) as total_points'),
-                    DB::raw('SUM(courses.credit_hours) as total_hours')
-                )
-                ->first();
-            
-            if ($result->total_hours > 0) {
-                $gpa = round($result->total_points / $result->total_hours, 2);
-                $student->gpa = $gpa;
-                $student->save();
-                Log::info("Updated GPA for student {$studentNumber} to {$gpa}");
-            } else {
-                $student->gpa = 0.0;
-                $student->save();
+        // 3) خريطة student_number => student_id
+        $studentIds = Student::pluck('id','student_number');
+
+        // 4) تحضير سجلات student_courses مع student_id بدلاً من student_number
+        $courseUpserts = [];
+        foreach ($records as $rec) {
+            $sid = $studentIds[$rec['student_number']] ?? null;
+            if (!$sid) continue;
+            $courseUpserts[] = [
+                'student_id'   => $sid,
+                'course_id'    => $rec['course_id'],
+                'semester_id'  => $rec['semester_id'],
+                'status'       => $rec['status'],
+                'final_mark'   => $rec['final_mark'],
+                'grade'        => $rec['grade'],
+                'result_code'  => $rec['result_code'],
+                'point'        => $rec['point'],
+                'created_at'   => $rec['created_at'],
+                'updated_at'   => $rec['updated_at'],
+            ];
+        }
+
+        // 5) إدراج أو تحديث السجلات فى student_courses فى دفعات (chunks)
+        Log::info('Inserting ' . count($courseUpserts) . ' student course records in batches...');
+        $insertedCount = 0;
+        foreach (array_chunk($courseUpserts, 1000) as $chunk) {
+            try {
+                DB::table('student_courses')->upsert(
+                    $chunk,
+                    ['student_id','course_id'], // المفاتيح الفريدة
+                    ['semester_id','status','final_mark','grade','result_code','point','updated_at']
+                );
+                $insertedCount += count($chunk);
+                Log::info("Inserted {$insertedCount} student course records");
+            } catch (\Exception $e) {
+                Log::error("Error inserting student course batch: " . $e->getMessage());
+                throw $e;
             }
         }
+
+        // 6) حساب وتحديث كل معدلات الطلاب فى خطوة واحدة
+        // الصفر الافتراضى
+        DB::table('students')->update(['gpa' => 0]);
+
+        // استعلام فرعى لحساب مجموع النقاط والساعات للمواد المكتملة
+        $gpaSub = DB::table('student_courses')
+            ->join('courses','courses.id','=','student_courses.course_id')
+            ->where('student_courses.status','completed')
+            ->select(
+                'student_courses.student_id',
+                DB::raw('SUM(student_courses.point * courses.credit_hours) as total_points'),
+                DB::raw('SUM(courses.credit_hours) as total_hours')
+            )
+            ->groupBy('student_courses.student_id')
+            ->havingRaw('SUM(courses.credit_hours) > 0'); // Only include students with completed courses
+
+        DB::table('students')
+            ->joinSub($gpaSub, 'gpa_sub', function($join){
+                $join->on('students.id','=','gpa_sub.student_id');
+            })
+            ->update([
+                'students.gpa' => DB::raw('ROUND(gpa_sub.total_points / NULLIF(gpa_sub.total_hours, 0), 2)')
+            ]);
+
+        // Clean up memory
+        gc_collect_cycles();
         
-        Log::info('--- PharmacyStudentRecordSeeder has finished updating GPAs ---');
+        Log::info('--- PharmacyStudentRecordSeeder FINISHED successfully ---');
     }
 }

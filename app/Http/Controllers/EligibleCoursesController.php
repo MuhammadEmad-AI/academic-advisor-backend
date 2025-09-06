@@ -32,8 +32,10 @@ class EligibleCoursesController extends Controller
 
         // 3. جميع مواد الدرجة مع متطلباتها
         $allDegreeCourses = $student->degree->courses()
-            ->with(['prerequisites.prerequisite', 'requirements'])
-            ->get();
+        ->where('status', 'active')      // لا نختار المواد المعطلة
+        ->where('credit_hours', '>', 0)  // لا نختار مواد بساعات صفرية
+        ->with(['prerequisites.prerequisite', 'requirements'])
+        ->get();
 
         // 4. استبعاد المكتملة والمواد التى فى الخطة الحالية
         $excludedIds = $completedCourseIds->merge($planCourseIds);

@@ -53,18 +53,24 @@ class CourseSemesterSeeder extends Seeder
                 Log::info("Processed {$rowCount} rows from pharmacy degree plan CSV");
             }
             
-            if (count($data) < 8) {
+            if (count($data) < 6) {
                 Log::warning("Row {$rowCount}: Insufficient columns in pharmacy degree plan CSV");
                 continue;
             }
 
-            $courseCode = trim($data[0]); // Column A: Course Code
-            $year = trim($data[4]);       // Column E: Year
-            $semester = trim($data[5]);   // Column F: Semester
+            $courseCode = trim($data[0]); // Column 0: Course Code
+            $academicYear = trim($data[4]); // Column 4: Academic Year (1, 2, 3, 4, 5)
+            $semester = trim($data[5]);   // Column 5: Semester (1, 2, 3)
 
-            if (empty($courseCode) || empty($year) || empty($semester)) {
+            if (empty($courseCode) || empty($academicYear) || empty($semester)) {
+                Log::warning("Row {$rowCount}: Missing data - Course: '{$courseCode}', Academic Year: '{$academicYear}', Semester: '{$semester}'");
                 continue;
             }
+            
+            // Map academic year to calendar year (assuming 5-year program starting from 2018)
+            $calendarYear = 2017 + (int)$academicYear; // Year 1 = 2018, Year 2 = 2019, etc.
+            
+            Log::info("Row {$rowCount}: Processing course '{$courseCode}' for academic year '{$academicYear}' (calendar year {$calendarYear}), semester '{$semester}'");
 
             // Find the course
             $course = DB::table('courses')->where('course_number', $courseCode)->first();
@@ -82,12 +88,12 @@ class CourseSemesterSeeder extends Seeder
             };
             
             $semesterRecord = DB::table('semesters')
-                ->where('Year', $year)
+                ->where('Year', $calendarYear)
                 ->where('SemesterName', $semesterName)
                 ->first();
 
             if (!$semesterRecord) {
-                Log::warning("Semester not found: Year {$year}, Semester {$semester}");
+                Log::warning("Semester not found: Calendar Year {$calendarYear}, Semester {$semester} ({$semesterName})");
                 continue;
             }
 
@@ -107,7 +113,7 @@ class CourseSemesterSeeder extends Seeder
                     ]);
                     
                     $insertedCount++;
-                    Log::info("Linked course {$courseCode} to semester {$year}-{$semester}");
+                    Log::info("Linked course {$courseCode} to semester {$calendarYear}-{$semester}");
                 } catch (\Exception $e) {
                     Log::warning("Failed to link course {$courseCode} to semester {$year}-{$semester}: " . $e->getMessage());
                 }
@@ -141,18 +147,24 @@ class CourseSemesterSeeder extends Seeder
         while (($data = fgetcsv($file, 2000, ',')) !== false) {
             $rowCount++;
             
-            if (count($data) < 7) {
+            if (count($data) < 6) {
                 Log::warning("Row {$rowCount}: Insufficient columns in university requirements CSV");
                 continue;
             }
 
-            $courseCode = trim($data[0]); // Column A: Course Code
-            $semester = trim($data[4]);   // Column E: Semester
-            $year = trim($data[5]);       // Column F: Year
+            $courseCode = trim($data[0]); // Column 0: Course Code
+            $semester = trim($data[4]);   // Column 4: Semester
+            $academicYear = trim($data[5]); // Column 5: Academic Year (1, 2, 3, 4, 5)
 
-            if (empty($courseCode) || empty($year) || empty($semester)) {
+            if (empty($courseCode) || empty($academicYear) || empty($semester)) {
+                Log::warning("Row {$rowCount}: Missing data - Course: '{$courseCode}', Academic Year: '{$academicYear}', Semester: '{$semester}'");
                 continue;
             }
+            
+            // Map academic year to calendar year (assuming 5-year program starting from 2018)
+            $calendarYear = 2017 + (int)$academicYear; // Year 1 = 2018, Year 2 = 2019, etc.
+            
+            Log::info("Row {$rowCount}: Processing course '{$courseCode}' for academic year '{$academicYear}' (calendar year {$calendarYear}), semester '{$semester}'");
 
             // Find the course
             $course = DB::table('courses')->where('course_number', $courseCode)->first();
@@ -170,12 +182,12 @@ class CourseSemesterSeeder extends Seeder
             };
             
             $semesterRecord = DB::table('semesters')
-                ->where('Year', $year)
+                ->where('Year', $calendarYear)
                 ->where('SemesterName', $semesterName)
                 ->first();
 
             if (!$semesterRecord) {
-                Log::warning("Semester not found: Year {$year}, Semester {$semester}");
+                Log::warning("Semester not found: Calendar Year {$calendarYear}, Semester {$semester} ({$semesterName})");
                 continue;
             }
 
@@ -195,7 +207,7 @@ class CourseSemesterSeeder extends Seeder
                     ]);
                     
                     $insertedCount++;
-                    Log::info("Linked course {$courseCode} to semester {$year}-{$semester}");
+                    Log::info("Linked course {$courseCode} to semester {$calendarYear}-{$semester}");
                 } catch (\Exception $e) {
                     Log::warning("Failed to link course {$courseCode} to semester {$year}-{$semester}: " . $e->getMessage());
                 }
