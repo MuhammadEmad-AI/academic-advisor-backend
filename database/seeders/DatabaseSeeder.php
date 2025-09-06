@@ -37,11 +37,11 @@ class DatabaseSeeder extends Seeder
             CourseSemesterSeeder::class,
 
             // 7. الطالب وسجله
-            // PharmacyStudentRecordSeeder::class, 
-            // PredictedMarksSeeder::class,
+            PharmacyStudentRecordSeeder::class, 
+            PredictedMarksSeeder::class,
 
-            // // 8. ربط الطلاب بالفصول الدراسية
-            // StudentSemesterSeeder::class,
+            // 8. ربط الطلاب بالفصول الدراسية
+            StudentSemesterSeeder::class,
         ]);
     }
 }
