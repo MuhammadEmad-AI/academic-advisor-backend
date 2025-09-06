@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\Student;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class CalculateGpaCommand extends Command
 {
@@ -34,29 +35,34 @@ class CalculateGpaCommand extends Command
         try {
             // 1. Reset all GPAs to 0 first
             $this->info('Resetting all student GPAs to 0...');
-            \DB::table('students')->update(['gpa' => 0]);
+            DB::table('students')->update(['gpa' => 0]);
             
-            // 2. Calculate GPA using a single optimized query (same as in PharmacyStudentRecordSeeder)
+            // 2. Calculate GPA using database-agnostic approach
             $this->info('Calculating GPAs using optimized query...');
             
-            $gpaSub = \DB::table('student_courses')
+            $gpaData = DB::table('student_courses')
                 ->join('courses', 'courses.id', '=', 'student_courses.course_id')
                 ->where('student_courses.status', 'completed')
                 ->select(
                     'student_courses.student_id',
-                    \DB::raw('SUM(student_courses.point * courses.credit_hours) as total_points'),
-                    \DB::raw('SUM(courses.credit_hours) as total_hours')
+                    DB::raw('SUM(student_courses.point * courses.credit_hours) as total_points'),
+                    DB::raw('SUM(courses.credit_hours) as total_hours')
                 )
                 ->groupBy('student_courses.student_id')
-                ->havingRaw('SUM(courses.credit_hours) > 0'); // Only include students with completed courses
+                ->havingRaw('SUM(courses.credit_hours) > 0') // Only include students with completed courses
+                ->get();
 
-            $updatedCount = \DB::table('students')
-                ->joinSub($gpaSub, 'gpa_sub', function($join){
-                    $join->on('students.id','=','gpa_sub.student_id');
-                })
-                ->update([
-                    'students.gpa' => \DB::raw('ROUND(gpa_sub.total_points / gpa_sub.total_hours, 2)')
-                ]);
+            // Update GPAs using PHP instead of complex SQL
+            $updatedCount = 0;
+            foreach ($gpaData as $gpaRecord) {
+                if ($gpaRecord->total_hours > 0) {
+                    $gpa = round($gpaRecord->total_points / $gpaRecord->total_hours, 2);
+                    DB::table('students')
+                        ->where('id', $gpaRecord->student_id)
+                        ->update(['gpa' => $gpa]);
+                    $updatedCount++;
+                }
+            }
 
             $this->info("Updated GPA for {$updatedCount} students");
             Log::info("Updated GPA for {$updatedCount} students");

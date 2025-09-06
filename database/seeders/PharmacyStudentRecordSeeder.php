@@ -183,7 +183,7 @@ class PharmacyStudentRecordSeeder extends Seeder
         DB::table('students')->update(['gpa' => 0]);
 
         // استعلام فرعى لحساب مجموع النقاط والساعات للمواد المكتملة
-        $gpaSub = DB::table('student_courses')
+        $gpaData = DB::table('student_courses')
             ->join('courses','courses.id','=','student_courses.course_id')
             ->where('student_courses.status','completed')
             ->select(
@@ -192,15 +192,18 @@ class PharmacyStudentRecordSeeder extends Seeder
                 DB::raw('SUM(courses.credit_hours) as total_hours')
             )
             ->groupBy('student_courses.student_id')
-            ->havingRaw('SUM(courses.credit_hours) > 0'); // Only include students with completed courses
+            ->havingRaw('SUM(courses.credit_hours) > 0') // Only include students with completed courses
+            ->get();
 
-        DB::table('students')
-            ->joinSub($gpaSub, 'gpa_sub', function($join){
-                $join->on('students.id','=','gpa_sub.student_id');
-            })
-            ->update([
-                'students.gpa' => DB::raw('ROUND(gpa_sub.total_points / NULLIF(gpa_sub.total_hours, 0), 2)')
-            ]);
+        // تحديث المعدلات باستخدام PHP بدلاً من SQL المعقد
+        foreach ($gpaData as $gpaRecord) {
+            if ($gpaRecord->total_hours > 0) {
+                $gpa = round($gpaRecord->total_points / $gpaRecord->total_hours, 2);
+                DB::table('students')
+                    ->where('id', $gpaRecord->student_id)
+                    ->update(['gpa' => $gpa]);
+            }
+        }
 
         // Clean up memory
         gc_collect_cycles();

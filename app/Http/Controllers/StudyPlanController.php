@@ -38,7 +38,7 @@ class StudyPlanController extends Controller
         $data = $request->validate([
             'name' => 'nullable|string|max:255',
         ]);
-        if($student->studyPlan())
+        if($student->studyPlans()->exists())
         {
             return response()->json(['message'=>'Student has a study plan']);
         }
