@@ -12,8 +12,8 @@ class Semester extends Model
 
     // --- تم تعديل أسماء الأعمدة هنا ---
     protected $fillable = [
-        'semester_name',
-        'year',
+        'SemesterName',
+        'Year',
     ];
 
     // --- تم تعديل المفاتيح الخارجية والوسيطة هنا ---

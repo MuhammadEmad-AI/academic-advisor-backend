@@ -38,6 +38,11 @@ class StudyPlanController extends Controller
         $data = $request->validate([
             'name' => 'nullable|string|max:255',
         ]);
+        if($student->studyPlan())
+        {
+            return response()->json(['message'=>'Student has a study plan']);
+        }
+        
         $plan = $student->studyPlans()->create($data);
         return response()->json($plan, 201);
     }

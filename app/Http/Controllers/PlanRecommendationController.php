@@ -556,6 +556,7 @@ class PlanRecommendationController extends Controller
         foreach ($selected as $item) {
             $c = $item['course'];
             $responseCourses[] = [
+                'id'               => $c->id,
                 'course_number'    => $c->course_number,
                 'course_name'      => $c->course_name,
                 'credit_hours'     => $c->credit_hours,

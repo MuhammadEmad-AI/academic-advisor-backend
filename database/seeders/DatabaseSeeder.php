@@ -30,12 +30,18 @@ class DatabaseSeeder extends Seeder
             // 4. المتطلبات
             PrerequisiteSeeder::class,
 
-            // 5. الطالب وسجله
+            // 5. الفصول الدراسية
+            SemesterSeeder::class,
 
+            // 6. ربط المواد بالفصول الدراسية
+            CourseSemesterSeeder::class,
 
-
+            // 7. الطالب وسجله
             PharmacyStudentRecordSeeder::class, 
             PredictedMarksSeeder::class,
+
+            // 8. ربط الطلاب بالفصول الدراسية
+            StudentSemesterSeeder::class,
         ]);
     }
 }

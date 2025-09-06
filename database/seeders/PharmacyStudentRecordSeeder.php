@@ -27,19 +27,23 @@ class PharmacyStudentRecordSeeder extends Seeder
         $csvFile = fopen(database_path('data/pharmacy_student_records.csv'), 'r');
         fgetcsv($csvFile);
         
-        $recordLimit = 100;
-        $recordCounter = 0;
-
         $processedStudentNumbers = []; // مصفوفة لتخزين أرقام الطلاب الذين تمت معالجتهم
+        $batchSize = 500; // Process in smaller batches
+        $recordCount = 0;
 
         while (($data = fgetcsv($csvFile, 2000, ',')) !== false) {
+            $recordCount++;
+            
+            // Log progress every 1000 records
+            if ($recordCount % 1000 === 0) {
+                Log::info("Processed {$recordCount} records so far...");
+            }
             
             $studentNumber = trim($data[1]);
-            if (isset($data[2]) && strpos(trim($data[2]), '2024') === 0) {
-                if ($recordCounter >= $recordLimit) {
-                    Log::info("Reached the limit of {$recordLimit} records. Stopping the loop.");
-                    break; // break تعني: اخرج من حلقة while فوراً
-                }
+            $yearCode = trim($data[2]);
+            
+            // Process all years from 2018 to 2024
+            if (isset($data[2]) && preg_match('/^(201[8-9]|202[0-4])\d$/', $yearCode)) {
                 // ... (بقية كود استخلاص البيانات)
                 $partId = trim($data[2]);
                 $courseCode = trim($data[6]);
@@ -77,26 +81,50 @@ class PharmacyStudentRecordSeeder extends Seeder
                 }
 
                 $course = Course::where('course_number', $courseCode)->first();
-                $semester = Semester::firstOrCreate(['Year' => substr($partId, 0, 4), 'SemesterName' => substr($partId, 4, 1)]);
+                
+                // Parse year code and create semester with proper name
+                $year = substr($partId, 0, 4);
+                $semesterNumber = substr($partId, 4, 1);
+                $semesterName = match((int)$semesterNumber) {
+                    1 => 'Fall',
+                    2 => 'Spring',
+                    3 => 'Summer',
+                    default => 'Fall'
+                };
+                
+                $semester = Semester::firstOrCreate([
+                    'Year' => $year, 
+                    'SemesterName' => $semesterName
+                ]);
+                
                 $status = ($point > 0.0 && $resultCode === 'P') ? 'completed' : 'failed';
 
                 if ($student && $course && $semester) {
                     // نستخدم updateOrInsert لتجنب أخطاء تكرار المفتاح الأساسي
-                    DB::table('student_courses')->updateOrInsert(
-                        ['student_id' => $student->id, 'course_id' => $course->id],
-                        [
-                            'semester_id' => $semester->id,
-                            'status' => $status,
-                            'final_mark' => $finalMark,
-                            'grade' => $grade,
-                            'result_code' => $resultCode,
-                            'point' => $point,
-                            'created_at'  => now(),
-                            'updated_at' => now(),
-                        ]
-                    );
+                    try {
+                        DB::table('student_courses')->updateOrInsert(
+                            ['student_id' => $student->id, 'course_id' => $course->id],
+                            [
+                                'semester_id' => $semester->id,
+                                'status' => $status,
+                                'final_mark' => $finalMark,
+                                'grade' => $grade,
+                                'result_code' => $resultCode,
+                                'point' => $point,
+                                'created_at'  => now(),
+                                'updated_at' => now(),
+                            ]
+                        );
+                    } catch (\Exception $e) {
+                        Log::warning("Failed to insert student course record: " . $e->getMessage());
+                        continue;
+                    }
                 }
-                $recordCounter++;
+                
+                // Clear memory every 1000 records
+                if ($recordCount % 1000 === 0) {
+                    gc_collect_cycles();
+                }
 
             }
         }

@@ -16,6 +16,10 @@ class EligibleCoursesController extends Controller
             return response()->json(['message' => 'Student profile not found.'], 404);
         }
 
+        $planCreditHours = $student->courses()
+        ->wherePivotIn('status', ['selected', 'in_progress'])
+        ->sum('credit_hours'); // ستعيد 0 إذا لم تكن هناك خطة
+
         // 1. معرفات المواد المكتملة (passed)
         $completedCourseIds = $student->courses()
             ->wherePivot('status', 'completed')
@@ -241,7 +245,10 @@ class EligibleCoursesController extends Controller
             ];
         });
 
-        return response()->json($formattedCourses->values());
+        return response()->json([
+            'plan_credit_hours' => $planCreditHours,           // عدد الساعات فى خطة الطالب الحالية أو 0
+            'eligible_courses'  => $formattedCourses->values() // قائمة المواد المؤهّلة كما هى
+        ]);
     }
 }
 
