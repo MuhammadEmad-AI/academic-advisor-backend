@@ -28,7 +28,7 @@ class EligibleCoursesController extends Controller
 
         // 3. جميع مواد الدرجة مع متطلباتها
         $allDegreeCourses = $student->degree->courses()
-            ->with(['prerequisites.requirements', 'requirements'])
+            ->with(['prerequisites.prerequisite', 'requirements'])
             ->get();
 
         // 4. استبعاد المكتملة والمواد التى فى الخطة الحالية
@@ -37,9 +37,23 @@ class EligibleCoursesController extends Controller
 
         // 5. تصفية المواد التى تستوفى شروط المتطلبات المسبقة
         $eligibleCourses = $remainingCourses->filter(function ($course) use ($completedCourseIds) {
-            $prerequisiteIds = $course->prerequisites->pluck('id');
+            $prerequisiteIds = $course->prerequisites->pluck('prerequisite_id');
             return $prerequisiteIds->diff($completedCourseIds)->isEmpty();
         });
+
+        // 6. إضافة المواد المرفوعة شرطياً للطلاب ذوى المعدل المنخفض (GPA < 2.0)
+        $studentGpa = $student->gpa ?? 0;
+        if ($studentGpa < 2.0) {
+            // جلب المواد المرفوعة شرطياً (علامة بين 50 و 60)
+            $conditionalCourses = $student->courses()
+                ->wherePivot('status', 'completed')
+                ->wherePivot('final_mark', '>=', 50)
+                ->wherePivot('final_mark', '<', 60)
+                ->get();
+
+            // إضافة هذه المواد للمواد المؤهلة
+            $eligibleCourses = $eligibleCourses->merge($conditionalCourses);
+        }
 
         /**
          * NEW: تحديد سقف الساعات الاختيارية المطلوبة لكل فئة
@@ -169,24 +183,31 @@ class EligibleCoursesController extends Controller
             ->merge($selectedUniversityElectives)
             ->unique('id'); // للتأكد من عدم التكرار
 
-        // تحديد المواد الراسبة لإسناد history_status
+        // تحديد المواد الراسبة والمواد المرفوعة شرطياً لإسناد history_status
         $failedCoursesIds = $student->courses()
             ->wherePivot('status', 'failed')
             ->pluck('courses.id');
 
+        $conditionalCoursesIds = $student->courses()
+            ->wherePivot('status', 'completed')
+            ->wherePivot('final_mark', '>=', 50)
+            ->wherePivot('final_mark', '<', 60)
+            ->pluck('courses.id');
+
         // 6. التنسيق النهائى للإرجاع، مع حقول history_status و requirement_type و prerequisites
-        $formattedCourses = $restrictedEligibleCourses->map(function ($course) use ($student, $failedCoursesIds) {
+        $formattedCourses = $restrictedEligibleCourses->map(function ($course) use ($student, $failedCoursesIds, $conditionalCoursesIds) {
             $mainRequirement = $course->requirements
                 ->where('degree_id', $student->degree_id)
                 ->first();
 
             $formattedPrerequisites = $course->prerequisites->map(function ($prereq) use ($student) {
-                $prereqRequirement = $prereq->requirements
+                $prereqCourse = $prereq->prerequisite; // Get the actual Course model
+                $prereqRequirement = $prereqCourse->requirements
                     ->where('degree_id', $student->degree_id)
                     ->first();
                 return [
-                    'course_number'    => $prereq->course_number,
-                    'course_name'      => $prereq->course_name,
+                    'course_number'    => $prereqCourse->course_number,
+                    'course_name'      => $prereqCourse->course_name,
                     'requirement_type' => $prereqRequirement
                         ? $prereqRequirement->requirement_type
                         : null,
@@ -210,7 +231,9 @@ class EligibleCoursesController extends Controller
                     : null,
                 'history_status' => $failedCoursesIds->contains($course->id)
                     ? 'failed_before'
-                    : 'not_taken_before',
+                    : ($conditionalCoursesIds->contains($course->id)
+                        ? 'conditional_promotion'
+                        : 'not_taken_before'),
                 'requirement_type' => $mainRequirement
                     ? $mainRequirement->requirement_type
                     : null,

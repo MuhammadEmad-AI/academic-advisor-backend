@@ -32,7 +32,7 @@ class PlanRecommendationController extends Controller
         // جلب بيانات الطالب مع العلاقات اللازمة
         $student = Student::where('student_number', $validated['student_number'])
         ->with([
-            'courses.prerequisites.requirements',
+            'courses.prerequisites.prerequisite',
             'degree.courses.prerequisites',
             'degree.courses.requirements',
         ])
@@ -83,14 +83,14 @@ class PlanRecommendationController extends Controller
             ->pluck('courses.id');
 
         $allDegreeCourses = $student->degree->courses()
-            ->with(['prerequisites.requirements', 'requirements'])
+            ->with(['prerequisites.prerequisite', 'requirements'])
             ->get();
 
         $remainingCourses = $allDegreeCourses->whereNotIn('id', $completedCourseIds->merge($planCourseIds));
 
         // تصفية المواد المؤهلة (لا متطلبات أو متطلباتها مكتملة)
         $eligibleCourses = $remainingCourses->filter(function ($course) use ($completedCourseIds) {
-            $prerequisiteIds = $course->prerequisites->pluck('id');
+            $prerequisiteIds = $course->prerequisites->pluck('prerequisite_id');
             return $prerequisiteIds->diff($completedCourseIds)->isEmpty();
         });
 
@@ -404,7 +404,7 @@ class PlanRecommendationController extends Controller
                             ->whereNotIn('id', $completedIds->merge($inProgressIds));
         // فلترة بحسب المتطلبات
         $eligible = $remaining->filter(function ($course) use ($completedIds) {
-            $prereqIds = $course->prerequisites->pluck('id');
+            $prereqIds = $course->prerequisites->pluck('prerequisite_id');
             return $prereqIds->diff($completedIds)->isEmpty();
         });
 
